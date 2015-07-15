@@ -30,6 +30,7 @@
 
 extern TCB tcb[];							// task control block
 extern int curTask;							// current task #
+extern int deltaTics;					    // deltaTics
 
 // **********************************************************************
 //	local prototypes
@@ -327,8 +328,10 @@ static void timer_isr()
 	myClkTime = clock();
 	if ((myClkTime - myOldClkTime) >= ONE_TENTH_SEC)
 	{
+        deltaTics++;
 		myOldClkTime = myOldClkTime + ONE_TENTH_SEC;   // update old
 		semSignal(tics10thsec);
+        updateDeltaClock(deltaTics);
 	}
 
 	if ((currentTime - oldTime10) >= 3) {

@@ -26,12 +26,14 @@
 #define DEBUG_OVERRIDE		FALSE
 #define DEBUG_SIGNALS		FALSE || DEBUG_OVERRIDE
 #define DEBUG_QUEUE 		FALSE || DEBUG_OVERRIDE
+#define DEBUG_DELTA_CLOCK   FALSE || DEBUG_OVERRIDE
 #define DEBUG_TASKS 		FALSE || DEBUG_OVERRIDE
 #define DEBUG_PARSER		FALSE || DEBUG_OVERRIDE
 
 // ***********************************************************************
 // Miscellaneous equates
 #define MAX_TASKS 			127
+#define MAX_DELTAS 			127
 #define MAX_STRING_SIZE		127
 #define MAX_ARGS			50
 #define STACK_SIZE			(64*1024/sizeof(int))
@@ -91,6 +93,12 @@ typedef struct semaphore			// semaphore
 	int taskNum;						// semaphore creator task #
 	PQueue queue;						// queue waiting for semaphore
 } Semaphore;
+
+typedef struct delta			// semaphore
+{
+	int time;							// time until semaphore should be triggered
+    struct semaphore* sem;       		// semaphore that should be triggered
+} Delta;
 
 // task control block
 typedef struct							// task control block
@@ -186,6 +194,8 @@ int P2_signal2(int, char**);
 
 int P3_project3(int, char**);
 int P3_dc(int, char**);
+int P3_tdc(int, char**);
+int updateDeltaClock(int tics);
 
 int P4_project4(int, char**);
 int P4_dumpFrame(int, char**);

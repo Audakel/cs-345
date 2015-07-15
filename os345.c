@@ -77,6 +77,7 @@ int inBufIndx;						// input pointer into input buffer
 char inBuffer[INBUF_SIZE+1];		// character input buffer
 //Message messages[NUM_MESSAGES];		// process message buffers
 
+int deltaTics;						// current clock()
 int pollClock;						// current clock()
 int lastPollClock;					// last pollClock
 bool diskMounted;					// disk has been mounted

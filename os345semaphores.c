@@ -46,7 +46,7 @@ extern Semaphore* semaphoreList;			// linked list of active semaphores
 void semSignal(Semaphore* s)
 {
     int tid;
-	// assert there is a semaphore and it is a legal type
+    // assert there is a semaphore and it is a legal type
 	assert("semSignal Error" && s && ((s->type == 0) || (s->type == 1)));
 
 	// check semaphore type
@@ -259,6 +259,7 @@ bool deleteSemaphore(Semaphore** semaphore)
             }
             free(sem->queue);
 			free(sem);
+            sem = 0;
 
 			return TRUE;
 		}
