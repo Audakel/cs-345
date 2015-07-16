@@ -465,7 +465,7 @@ void setMemoryData(int address, int value)
 int getCharacter()
 {
 	charFlag = 1;					// enable character inputs
-	SEM_WAIT(charReady)
+	SEM_WAIT(charReady);
 	if (inChar == 13) inChar = 10;	//if (inChar == CR) inChar = LF
 	charFlag = 0;					// disable character inputs
 	return inChar;
