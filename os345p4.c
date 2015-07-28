@@ -36,6 +36,8 @@ extern int memPageFaults;
 extern int nextPage;
 extern int pageReads;
 extern int pageWrites;
+extern int cBigHand;
+extern int cLittleHand;
 
 extern unsigned short int memory[];
 extern int getMemoryData(int);
@@ -51,6 +53,7 @@ void displayUPT(int rptNum, int uptNum);
 void displayPage(int pn);
 void displayPT(int pta, int badr, int inc);
 void lookVM(int va);
+void displayTableHierarchy(void);
 
 // *****************************************************************************
 // project4 command
@@ -114,30 +117,38 @@ int P4_vmaccess(int argc, char* argv[])
 {
 	unsigned short int adr, rpt, upt;
 
-	printf("\nValidate arguments...");	// ?? validate arguments
+//	printf("\nValidate arguments...");	// ?? validate arguments
 	adr = INTEGER(argv[1]);
 
 	printf(" = %04x", getMemAdr(adr, 1)-&MEMWORD(0));
-	for (rpt = 0; rpt < 64; rpt+=2)
-	{
-		if (MEMWORD(rpt+TASK_RPT) || MEMWORD(rpt+TASK_RPT+1))
-		{
-			outPTE("  RPT  =", rpt+TASK_RPT);
-			for(upt = 0; upt < 64; upt+=2)
-			{
-				if (DEFINED(MEMWORD(rpt+TASK_RPT)) &&
-					(DEFINED(MEMWORD((FRAME(MEMWORD(rpt+TASK_RPT))<<6)+upt))
-					|| PAGED(MEMWORD((FRAME(MEMWORD(rpt+TASK_RPT))<<6)+upt+1))))
-				{
-					outPTE("    UPT=", (FRAME(MEMWORD(rpt+TASK_RPT))<<6)+upt);
-				}
-			}
-		}
-	}
-	printf("\nPages = %d", nextPage);
+    displayTableHierarchy();
+
 	return 0;
 } // end P4_vmaccess
 
+void displayTableHierarchy()
+{
+    unsigned short int rpt,upt;
+    for (rpt = 0; rpt < 64; rpt+=2)
+    {
+        if (MEMWORD(rpt+TASK_RPT) || MEMWORD(rpt+TASK_RPT+1))
+        {
+            outPTE("  RPT  =", rpt+TASK_RPT);
+            for(upt = 0; upt < 64; upt+=2)
+            {
+                if (DEFINED(MEMWORD(rpt+TASK_RPT)) &&
+                    (DEFINED(MEMWORD((FRAME(MEMWORD(rpt+TASK_RPT))<<6)+upt))
+                     || PAGED(MEMWORD((FRAME(MEMWORD(rpt+TASK_RPT))<<6)+upt+1))))
+                {
+                    outPTE("    UPT=", (FRAME(MEMWORD(rpt+TASK_RPT))<<6)+upt);
+                }
+            }
+        }
+    }
+    printf("\nPages = %d", nextPage);
+
+    return;
+}
 
 
 // **************************************************************************
@@ -176,6 +187,8 @@ int P4_initMemory(int argc, char* argv[])
 	if (highAdr < 0x3000) highAdr = (highAdr<<6) + 0x3000;
 	if (highAdr > 0xf000) highAdr = 0xf000;
 	printf("\nSetting upper memory limit to 0x%04x", highAdr);
+    cBigHand = LC3_RPT;
+    cLittleHand = 0;
 
 	// init LC3 memory
 	initLC3Memory(LC3_MEM_FRAME, highAdr>>6);
@@ -218,7 +231,8 @@ int P4_dumpVirtualMem(int argc, char* argv[])	// dump virtual lc-3 memory
 int P4_virtualMemStats(int argc, char* argv[])
 {
 	double missRate;
-	missRate = (memAccess)?(((double)memPageFaults)/(double)memAccess)*100.0:0;
+//    memAccess = memHits + memPageFaults;
+	missRate = (memAccess)?(((double)memPageFaults)/(double)(memAccess))*100.0:0;
 	printf("\nMemory accesses = %d", memAccess);
 	printf("\n           hits = %d", memHits);
 	printf("\n         faults = %d", memPageFaults);
@@ -264,7 +278,7 @@ int P4_rootPageTable(int argc, char* argv[])
 {
 	int rpt;
 
-	printf("\nValidate arguments...");	// ?? validate arguments
+//	printf("\nValidate arguments...");	// ?? validate arguments
 	rpt = INTEGER(argv[1]);
 
 	displayRPT(rpt);
@@ -280,7 +294,7 @@ int P4_userPageTable(int argc, char* argv[])
 {
 	int rpt, upt;
 
-	printf("\nValidate arguments...");	// ?? validate arguments
+//	printf("\nValidate arguments...");	// ?? validate arguments
 	rpt = INTEGER(argv[1]);
 	upt = INTEGER(argv[2]);
 

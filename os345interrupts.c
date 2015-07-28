@@ -69,7 +69,8 @@ extern int superMode;						// system mode
 // **********************************************************************
 // **********************************************************************
 // Command Line History
-char* historyBuffer[HISTORY_SIZE];	// character input buffer
+//char* historyBuffer[HISTORY_SIZE] = {"im 8", "vma 0x3000", "vma 0x3001", "vma 0x3040", "vma 0x3041", "vma 0xEF92", "vma 0xD851", "vma 0xD833", "vma 0x3833"};	// character input buffer
+char* historyBuffer[HISTORY_SIZE] = { NULL };	// character input buffer
 int historyIndex;	// character input buffer
 int historyUserIndex;	// character input buffer
 bool historyMode;
