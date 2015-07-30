@@ -45,6 +45,8 @@ int getFrame(int);
 int getClockFrame(int);
 int getAvailableFrame(void);
 void swapOutFrame(int entry1Index);
+extern TCB tcb[];					// task control block
+extern int curTask;					// current task #
 
 
 int getFrame(int notme)
@@ -190,7 +192,8 @@ unsigned short int *getMemAdr(int va, int rwFlg)
 	int rptFrame, uptFrame;
     memAccess += 2;
 
-	rpta = 0x2400 + RPTI(va);
+//	rpta = 0x2400 + RPTI(va);
+    rpta = tcb[curTask].RPT + RPTI(va);
 	rpte1 = memory[rpta];
 	rpte2 = memory[rpta+1];
 
