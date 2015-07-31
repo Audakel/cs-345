@@ -120,6 +120,7 @@ typedef struct							// task control block
 	TID parent;							// task parent
 	int RPT;								// task root page table (project 5)
 	int cdir;							// task directory (project 6)
+	int taskTime;						// how much time a task gets
 	Semaphore *event;					// blocked task semaphore
 	void* stack;						// task stack
 	jmp_buf context;					// task context pointer

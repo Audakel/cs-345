@@ -36,6 +36,7 @@
 void pollInterrupts(void);
 static int scheduler(void);
 static int dispatcher(void);
+int allotTime();
 
 //static void keyboard_isr(void);
 //static void timer_isr(void);
@@ -252,7 +253,7 @@ int main(int argc, char* argv[])
 //
 static int scheduler()
 {
-	int nextTask;
+	int nextTask = -1;
 	// ?? Design and implement a scheduler that will select the next highest
 	// ?? priority ready task to pass to the system dispatcher.
 
@@ -269,11 +270,30 @@ static int scheduler()
 
 	// schedule next task
     schedulerPass = TRUE;
-    if ((nextTask = deQ(rq, -1)) >= 0) {
-        enQ(rq, nextTask, tcb[nextTask].priority);
+    if (scheduler_mode == 0) {
+        // Priority Round Robin
+        if ((nextTask = deQ(rq, -1)) >= 0) {
+            enQ(rq, nextTask, tcb[nextTask].priority);
+        } else {
+            nextTask = 0;
+        }
     } else {
-        nextTask = 0;
+        // Fair Scheduling
+        for (int i = rq[0]; i > 0; i--) { // we need to actually rotate through the rq
+            if (tcb[rq[i]].name && tcb[rq[i]].taskTime > 0) {
+                nextTask = rq[i];
+                --tcb[rq[i]].taskTime;
+                break;
+            }
+        }
+
+        if (nextTask < 0) {
+            allotTime();
+
+            nextTask = 0;
+        }
     }
+
     schedulerPass = FALSE;
 
     if (tcb[nextTask].signal & mySIGSTOP) {
@@ -283,7 +303,57 @@ static int scheduler()
     return nextTask;
 } // end scheduler
 
+int allotTime()
+{
+    // need to recompute fair times and get the next task
+    int fair[MAX_TASKS] = {0};
+    int privilegeTaken[MAX_TASKS] = {0};
+    int time = rq[0] * 10;
+    int groupTime, leftOver, i, allotment, privilege, groupId, groups = 0;
 
+    for (i = rq[0]; i > 0; i--) {
+        if (rq[i] == 0 || !tcb[rq[i]].name) {
+            continue; // skip the shell and dead tasks
+        }
+        // count number of groups
+        // count number of children of each group (in respective group index)
+        groupId = !tcb[rq[i]].parent ? rq[i] : tcb[rq[i]].parent;
+        if (fair[groupId] == 0) {
+            ++groups;
+        }
+        ++fair[groupId];
+    }
+
+    if (!groups) {
+        // no groups found
+        ++groups;
+    }
+    groupTime = time / groups; // each group gets an equal amount of time
+    leftOver = time - (groupTime * fair[0]); // extra time goes to shell
+
+    for (i = rq[0]; i > 0; i--) {
+        if (rq[i] == 0 || !tcb[rq[i]].name) {
+            continue; // skip the shell and dead tasks
+        }
+        groupId = !tcb[rq[i]].parent ? rq[i] : tcb[rq[i]].parent;
+
+        allotment = groupTime/fair[groupId]; // group time / members in the group
+        time -= allotment;
+        if (!privilegeTaken[groupId]) {
+            privilege = groupTime - (allotment * fair[groupId]);
+//            printf("\nGroup %d: Members %d, Allotment %d, Privelage %d",groupId, fair[groupId], allotment, privilege);
+            allotment += privilege;
+            time -= privilege;
+            privilegeTaken[groupId] = 1;
+        }
+
+        tcb[rq[i]].taskTime = allotment;
+    }
+
+    tcb[0].taskTime = time + leftOver; // give all leftover to shell
+
+    return 0;
+}
 
 // **********************************************************************
 // **********************************************************************
