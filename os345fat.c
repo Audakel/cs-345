@@ -110,7 +110,10 @@ int fmsCloseFile(int fileDescriptor)
 //            printf("\nWrote unflushed buffer");
         }
 
-        if ((error = fmsUpdateDirEntry(fdEntry))) return error;
+        if ((error = fmsUpdateDirEntry(fdEntry))) {
+            printf("\nErrored in update");
+            return error;
+        }
 
 //        printf("\nUpdated file information");
     }
@@ -219,10 +222,10 @@ int fmsOpenFile(char* fileName, int rwMode)
 
     //prepare the File Descriptor entry
     FDEntry* fdEntry = &OFTable[fdIndex];
-    strcpy(fdEntry->name,dirEntry.name);
-    strcpy(fdEntry->extension,dirEntry.extension);
+    strncpy(fdEntry->name,dirEntry.name, 8);
+    strncpy(fdEntry->extension,dirEntry.extension, 3);
     fdEntry->attributes = dirEntry.attributes;
-    fdEntry->directoryCluster = CDIR;
+    fdEntry->directoryCluster = (uint16) CDIR;
     fdEntry->startCluster = dirEntry.startCluster;
     fdEntry->currentCluster = 0;
     fdEntry->fileSize = (rwMode == OPEN_WRITE ? 0 : dirEntry.fileSize);
@@ -479,65 +482,41 @@ int getFreeCluster()
 int fmsUpdateDirEntry(FDEntry* fdEntry)
 //  This function finds a dirEntry relating to the fdEntry and updates it accordingly
 {
-    int num = 0;
-    int* dirNum = &num;
-    int dir = CDIR, loop = 0, dirCluster = dir;
-    char buffer[BYTES_PER_SECTOR];
-    int dirIndex, dirSector, error;
+
+    int dirNum = 0,dirIndex, error, dirSector;
     char fileName[32];
+    char buffer[BYTES_PER_SECTOR];
     strcpy(fileName, fdEntry->name);
-    strcat(fileName, fdEntry->extension);
-    DirEntry entry;
-    DirEntry* dirEntry = &entry;
-
-    while(1)
-    {	// load directory sector
-        if (dir)
-        {	// sub directory
-            while(loop--)
-            {
-                dirCluster = getFatEntry(dirCluster, FAT1);
-                if (dirCluster == FAT_EOC) return ERR67;
-                if (dirCluster == FAT_BAD) return ERR54;
-                if (dirCluster < 2) return ERR54;
-            }
-            dirSector = C_2_S(dirCluster);
-        }
-        else
-        {	// root directory
-            dirSector = (*dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR;
-            if (dirSector >= BEG_DATA_SECTOR) return ERR67;
-        }
-
-        // read sector into directory buffer
-        if (error = fmsReadSector(buffer, dirSector)) return error;
-
-        // find next matching directory entry
-        while(1)
-        {	// read directory entry
-            dirIndex = *dirNum % ENTRIES_PER_SECTOR;
-            memcpy(dirEntry, &buffer[dirIndex * sizeof(DirEntry)], sizeof(DirEntry));
-            if (dirEntry->name[0] == 0) return ERR67;	// EOD
-            (*dirNum)++;                        		// prepare for next read
-            if (dirEntry->name[0] == 0xe5);     		// Deleted entry, go on...
-            else if (dirEntry->attributes == LONGNAME);
-            else if (fmsMask(fileName, dirEntry->name, dirEntry->extension)) {
-                //found the dirEntry that needs to be updated
-                dirEntry->fileSize = fdEntry->fileSize;
-                dirEntry->startCluster = fdEntry->startCluster;
-                dirEntry->attributes = fdEntry->attributes;
-                setDirTimeDate(dirEntry);
-                memcpy(&buffer[dirIndex * sizeof(DirEntry)], dirEntry, sizeof(DirEntry));
-                if ((error = fmsWriteSector(&buffer, dirSector)) < 0) return error;
-                fdEntry->name[0] = 0;
-                return 0;
-            }
-
-            // break if sector boundary
-            if ((*dirNum % ENTRIES_PER_SECTOR) == 0) break;
-        }
-        // next directory sector/cluster
-        loop = 1;
+    DirEntry dirEntry;
+    if((error = fmsGetNextDirEntry(&dirNum,fileName,&dirEntry,CDIR))){
+        return error;
     }
+
+    dirNum--; //fmsGetNextDirEntry increments preemptively
+    dirIndex = dirNum % ENTRIES_PER_SECTOR; //same as process in fmsGetNextDir
+    // dirNum / ENTRIES_PER_SECTOR gives you which sector but you have to add offset to get to sector area in FAT
+    dirSector = dirNum / ENTRIES_PER_SECTOR + BEG_ROOT_SECTOR;
+
+    //Update dirEntry potential changes
+    dirEntry.fileSize = fdEntry->fileSize;
+    dirEntry.startCluster = fdEntry->startCluster;
+    dirEntry.attributes = fdEntry->attributes;
+    setDirTimeDate(&dirEntry);
+    //Read in entire sector
+    if ((error = fmsReadSector(buffer, dirSector))) {
+        printf("\nErrored in reading sector");
+        return error;
+    }
+    //update dirEntiry in sector
+    memcpy(&buffer[dirIndex * sizeof(DirEntry)], &dirEntry, sizeof(DirEntry));
+    //write back entire sector
+    if ((error = fmsWriteSector(&buffer, dirSector)) < 0) {
+        printf("\nErrored in writing sector");
+        return error;
+    };
+
+    //release fdEntry
+    fdEntry->name[0] = 0;
+
     return 0;
 } // end fmsGetNextDirEntry

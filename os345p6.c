@@ -1722,7 +1722,11 @@ int fmsGetNextDirEntry(int *dirNum, char* mask, DirEntry* dirEntry, int dir)
             (*dirNum)++;                        		// prepare for next read
             if (dirEntry->name[0] == 0xe5);     		// Deleted entry, go on...
             else if (dirEntry->attributes == LONGNAME);
-            else if (fmsMask(mask, dirEntry->name, dirEntry->extension)) return 0;   // return if valid
+            else if (fmsMask(mask, dirEntry->name, dirEntry->extension)) {
+                printf("\ndirNum = %d",*dirNum);
+                printf("\ndirSector = %d",dirSector);
+                return 0;
+            }   // return if valid
             // break if sector boundary
             if ((*dirNum % ENTRIES_PER_SECTOR) == 0) break;
         }
