@@ -40,8 +40,11 @@ int fmsReadFile(int, char*, int);
 int fmsSeekFile(int, int);
 int fmsWriteFile(int, char*, int);
 int fmsGetFDEntry(DirEntry* dirEntry);
-int getFreeCluster();
+int getFreeRootCluster();
+int getFreeDataCluster();
+int getDataCluster(int begin, int end);
 int fmsUpdateDirEntry(FDEntry* fdEntry);
+int getFreeDirEntry(int * dirNum, DirEntry* dirEntry, int * dirSector);
 
 // ***********************************************************************
 // ***********************************************************************
@@ -143,10 +146,89 @@ int fmsCloseFile(int fileDescriptor)
 //
 int fmsDefineFile(char* fileName, int attribute)
 {
-	// ?? add code here
-	printf("\nfmsDefineFile Not Implemented");
+    int dirNum = 0, dirIndex, error,dirSector,i;
+    int cluster, sector;
+    char* s;
+    char* dot = ".";
+    char* token;
+    char buffer[BYTES_PER_SECTOR];
+    DirEntry dirEntry, curDir, parentDir;
+    if (!fmsGetDirEntry(fileName, &dirEntry)) {
+        return ERR60;// file exists already
+    }
+    if((error = getFreeDirEntry(&dirNum, &dirEntry, &dirSector))){
+        return error;
+    }
 
-	return ERR72;
+    dirIndex = dirNum % ENTRIES_PER_SECTOR; //same as process in fmsGetNextDir
+
+    //we have a free dir entry
+    switch (attribute) {
+        case ARCHIVE:
+            if (!isValidFileName(fileName)) {
+                return ERR50; // invalid file name
+            }
+            for (i = 0; i < strlen(fileName); i++) {
+                fileName[i] = toupper(fileName[i]);
+            }
+            token = strtok(fileName,dot);
+            sprintf(dirEntry.name, "%-8s", token);
+            sprintf(dirEntry.extension, "%-3s", strtok(NULL,dot));
+            dirEntry.fileSize = 0;
+            dirEntry.startCluster = 0;
+            dirEntry.attributes = attribute;
+            setDirTimeDate(&dirEntry);
+            break;
+        case DIRECTORY:
+            s = strchr(fileName, '.');
+            if (s != NULL || strlen(fileName) > 8) {
+                return ERR50; // invalid file name, no extensions allowed
+            }
+            for (i = 0; i < strlen(fileName); i++) {
+                fileName[i] = toupper(fileName[i]);
+            }
+            if ((error = (CDIR ? getFreeDataCluster() : getFreeRootCluster())) < 0) return error;
+            cluster = error;
+
+            sprintf(dirEntry.name, "%-8s", fileName);
+            sprintf(dirEntry.extension, "   ");
+            dirEntry.attributes = attribute;
+            dirEntry.startCluster = cluster;
+            setDirTimeDate(&dirEntry);
+
+            setFatEntry(cluster, FAT_EOC, FAT1);
+            setFatEntry(cluster, FAT_EOC, FAT2);
+            sector = CDIR ? C_2_S(cluster) : cluster + BEG_ROOT_SECTOR;
+            if ((error = fmsReadSector(buffer, sector))) return error;
+
+            // Set "." entry
+            memcpy(&curDir, &buffer[0], sizeof(DirEntry));
+            sprintf(curDir.name, "%-8s", ".");
+            sprintf(curDir.extension, "   ");
+            curDir.attributes = DIRECTORY;
+            curDir.startCluster = cluster;
+            memcpy(&buffer[0], &curDir, sizeof(DirEntry));
+
+            // Set ".." entry
+            memcpy(&parentDir, &buffer[sizeof(DirEntry)], sizeof(DirEntry));
+            sprintf(parentDir.name, "%-8s", "..");
+            strcpy(parentDir.extension, "   ");
+            parentDir.attributes = DIRECTORY;
+            parentDir.startCluster = CDIR;
+            memcpy(&buffer[sizeof(DirEntry)], &parentDir, sizeof(DirEntry));
+
+            // Write in new sector entries
+            fmsWriteSector(&buffer, sector);
+            break;
+        default:
+            return ERR52; // we don't handle other file types
+    }
+
+    if ((error = fmsReadSector(buffer, dirSector))) return error;
+    memcpy(&buffer[dirIndex * sizeof(DirEntry)], &dirEntry, sizeof(DirEntry));
+    if ((error = fmsWriteSector(buffer, dirSector))) return error;
+
+	return 0;
 } // end fmsDefineFile
 
 
@@ -248,33 +330,6 @@ int fmsOpenFile(char* fileName, int rwMode)
 
     return fdIndex;
 } // end fmsOpenFile
-
-// ***********************************************************************
-// ***********************************************************************
-// This function searches the OFTable to find a empty slot for the given file
-// returns 0 if successful
-// error if:
-// - if another file is found with the same name and ext
-// - Too many files open
-int fmsGetFDEntry(DirEntry* dirEntry)
-{
-    int i, entryInd = -1;
-    FDEntry* fdEntry;
-
-    for (i = 0; i < 32; i++) {
-        fdEntry = &OFTable[i];
-        if (!strncmp(fdEntry->name, dirEntry->name, 8) && !strncmp(fdEntry->extension, dirEntry->extension, 3)) {
-            //both the name and extension match
-            return ERR62;
-        }
-
-        if (entryInd == -1 && fdEntry->name[0] == 0) {
-            entryInd = i;
-        }
-    }
-
-    return entryInd > -1 ? entryInd : ERR70; //if we found a entry return it otherwise too many files are open
-}
 
 // ***********************************************************************
 // ***********************************************************************
@@ -388,10 +443,11 @@ int fmsWriteFile(int fileDescriptor, char* buffer, int nBytes)
         if ((bufferIndex == 0) && (fdEntry->fileIndex || !fdEntry->currentCluster)) {
             if (fdEntry->currentCluster == 0) { //file has been lazy opened and buffer is not initialized
                 if (fdEntry->startCluster == 0) {
-                    if ((nextCluster = getFreeCluster()) < 2) return nextCluster;
+                    if ((nextCluster = getFreeDataCluster()) < 2) return nextCluster;
                     fdEntry->startCluster = (uint16) nextCluster;
                     //printf("\nAssigning cluster %d to new file %d", cluster, fileDescriptor);
                     setFatEntry(nextCluster, FAT_EOC, FAT1);
+                    setFatEntry(nextCluster, FAT_EOC, FAT2);
                 }
                 nextCluster = fdEntry->startCluster;
                 fdEntry->fileIndex = 0;
@@ -401,12 +457,14 @@ int fmsWriteFile(int fileDescriptor, char* buffer, int nBytes)
                 if (nextCluster == FAT_EOC) {
                     //we have reached the end of the cluster but still have more to write
                     //get a new cluster and append it to the end of the cluster chain
-                    if ((nextCluster = getFreeCluster())) {
+                    if ((nextCluster = getFreeDataCluster())) {
                         if (nextCluster < 2) {
                             return nextCluster; // error
                         }
                         setFatEntry(fdEntry->currentCluster,nextCluster, FAT1);
+                        setFatEntry(fdEntry->currentCluster,nextCluster, FAT2);
                         setFatEntry(nextCluster,FAT_EOC, FAT1);
+                        setFatEntry(nextCluster,FAT_EOC, FAT2);
                     }
 
                 }
@@ -440,13 +498,25 @@ int fmsWriteFile(int fileDescriptor, char* buffer, int nBytes)
 //        we have completed writing and the chain hasn't ended
 //        set the further links free
         setFatEntry(endCluster,0x00,FAT1);
+        setFatEntry(endCluster,0x00,FAT2);
         endCluster = nextCluster;
     }
     setFatEntry(fdEntry->currentCluster,FAT_EOC,FAT1);
+    setFatEntry(fdEntry->currentCluster,FAT_EOC,FAT2);
 
     return numBytesWritten;
 } // end fmsWriteFile
 
+
+int getFreeRootCluster()
+{
+    return getFreeCluster(BEG_ROOT_SECTOR, BEG_DATA_SECTOR);
+}
+
+int getFreeDataCluster()
+{
+    return getFreeCluster(BEG_DATA_SECTOR, SECTORS_PER_DISK);
+}
 
 /**
  * A 12-bit FAT entry may have the following values
@@ -456,13 +526,13 @@ int fmsWriteFile(int fileDescriptor, char* buffer, int nBytes)
  * 0xFF8-0xFFF End of file/directory, also called EOC (end of cluster chain).
  * other numbers are pointers (indexes) to the next cluster in the file/directory.
  */
-int getFreeCluster()
+int getFreeCluster(int begin, int end)
 {
     int cluster, error, sector;
     char buffer[BYTES_PER_SECTOR];
     memset(buffer, 0, BYTES_PER_SECTOR * sizeof(char));
 
-    for (cluster = 2; cluster < CLUSTERS_PER_DISK; cluster++)
+    for (cluster = begin; cluster < end; cluster++)
     {
 
         if (!getFatEntry(cluster, FAT1)) // if its an Unused cluster
@@ -475,6 +545,59 @@ int getFreeCluster()
     }
 
     return ERR65; // No empty entries found, so file space is full
+}
+
+int getFreeDirEntry(int * dirNum, DirEntry* dirEntry, int * dirSector)
+{
+    int dir = CDIR;
+    char buffer[BYTES_PER_SECTOR];
+    int dirIndex, error;
+    int loop = *dirNum / ENTRIES_PER_SECTOR;
+    int dirCluster = dir, newCluster;
+
+    while(1)
+    {	// load directory sector
+        if (dir)
+        {	// sub directory
+            while(loop--)
+            {
+                dirCluster = getFatEntry(dirCluster, FAT1);
+                if (dirCluster == FAT_EOC) {
+                    // we want to expand the dir then
+                    if ((newCluster = getFreeDataCluster()) < 2) return newCluster;
+                    setFatEntry(dirCluster, newCluster,FAT1);
+                    setFatEntry(dirCluster, newCluster,FAT2);
+                    setFatEntry(newCluster, FAT_EOC,FAT1);
+                    setFatEntry(newCluster, FAT_EOC,FAT2);
+                    dirCluster = newCluster;
+                }
+                if (dirCluster == FAT_BAD) return ERR54;
+                if (dirCluster < 2) return ERR54;
+            }
+            *dirSector = C_2_S(dirCluster);
+        }
+        else
+        {	// root directory
+            *dirSector = (*dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR;
+            if (*dirSector >= BEG_DATA_SECTOR) return ERR67;
+        }
+
+        // read sector into directory buffer
+        if (error = fmsReadSector(buffer, *dirSector)) return error;
+
+        // find next matching directory entry
+        while(1)
+        {	// read directory entry
+            dirIndex = *dirNum % ENTRIES_PER_SECTOR;
+            memcpy(dirEntry, &buffer[dirIndex * sizeof(DirEntry)], sizeof(DirEntry));
+            if (dirEntry->name[0] == 0 || dirEntry->name[0] == 0xe5) return 0;	// found a free dirEntry
+            (*dirNum)++;                        		// prepare for next read
+            if ((*dirNum % ENTRIES_PER_SECTOR) == 0) break;
+        }
+        // next directory sector/cluster
+        loop = 1;
+    }
+    return 1;
 }
 
 // ***************************************************************************************
@@ -494,8 +617,8 @@ int fmsUpdateDirEntry(FDEntry* fdEntry)
 
     dirNum--; //fmsGetNextDirEntry increments preemptively
     dirIndex = dirNum % ENTRIES_PER_SECTOR; //same as process in fmsGetNextDir
-    // dirNum / ENTRIES_PER_SECTOR gives you which sector but you have to add offset to get to sector area in FAT
-    dirSector = dirNum / ENTRIES_PER_SECTOR + BEG_ROOT_SECTOR;
+    // if its in the root directory (!CDIR) otherwise use C_2_S
+    dirSector = !CDIR ? (dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR : C_2_S(fdEntry->directoryCluster);
 
     //Update dirEntry potential changes
     dirEntry.fileSize = fdEntry->fileSize;
@@ -520,3 +643,30 @@ int fmsUpdateDirEntry(FDEntry* fdEntry)
 
     return 0;
 } // end fmsGetNextDirEntry
+
+// ***********************************************************************
+// ***********************************************************************
+// This function searches the OFTable to find a empty slot for the given file
+// returns 0 if successful
+// error if:
+// - if another file is found with the same name and ext
+// - Too many files open
+int fmsGetFDEntry(DirEntry* dirEntry)
+{
+    int i, entryInd = -1;
+    FDEntry* fdEntry;
+
+    for (i = 0; i < 32; i++) {
+        fdEntry = &OFTable[i];
+        if (!strncmp(fdEntry->name, dirEntry->name, 8) && !strncmp(fdEntry->extension, dirEntry->extension, 3)) {
+            //both the name and extension match
+            return ERR62;
+        }
+
+        if (entryInd == -1 && fdEntry->name[0] == 0) {
+            entryInd = i;
+        }
+    }
+
+    return entryInd > -1 ? entryInd : ERR70; //if we found a entry return it otherwise too many files are open
+}
