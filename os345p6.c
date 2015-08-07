@@ -431,25 +431,25 @@ int P6_copy(int argc, char* argv[])		 	// copy file
     while (nBytes > 0)
     {
         error = 0;
-        printf("\nReading from source");
+//        printf("\nReading from source");
         nBytes = fmsReadFile(FDs, buffer, BYTES_PER_SECTOR);
-        printf("\nRead from source");
+//        printf("\nRead from source");
         SWAP;
         if (nBytes < 0) break;
-        printf("\nWriting to destination\n");
+//        printf("\nWriting to destination\n");
         error = fmsWriteFile(FDd, buffer, nBytes);
-        printf("\nWrote to destination");
+//        printf("\nWrote to destination");
         if (error < 0) break;
         //for (error=0; error<nBytes; error++) putchar(buffer[error]);
     }
     if (nBytes != ERR66) fmsError(nBytes);
     if (error) fmsError(error);
 
-    printf("\nTrying to close source file");
+//    printf("\nTrying to close source file");
     error = fmsCloseFile(FDs);
     if (error) fmsError(error);
 
-    printf("\nTrying to close destination file");
+//    printf("\nTrying to close destination file");
     error = fmsCloseFile(FDd);
     if (error) fmsError(error);
     return 0;

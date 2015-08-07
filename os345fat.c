@@ -100,19 +100,19 @@ int fmsCloseFile(int fileDescriptor)
     if (fdEntry->name[0] == 0) return ERR63; // file not open
 
     if (fdEntry->mode != OPEN_READ) { // file was potentially altered and dirInfo needs to be updated
-        printf("\nFile was potentially updated");
+//        printf("\nFile was potentially updated");
 
         if (fdEntry->flags & BUFFER_ALTERED) { // buffer needs to be written back as it has been changed
             if ((error = fmsWriteSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster)))) {
                 return error;
             }
             fdEntry->flags ^= BUFFER_ALTERED;
-            printf("\nWrote unflushed buffer");
+//            printf("\nWrote unflushed buffer");
         }
 
-        fmsUpdateDirEntry(fdEntry);
+        if ((error = fmsUpdateDirEntry(fdEntry))) return error;
 
-        printf("\nUpdated file information");
+//        printf("\nUpdated file information");
     }
 
     fdEntry->name[0] = 0;
