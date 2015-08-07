@@ -402,7 +402,7 @@ int P6_type(int argc, char* argv[])		// display file
 int P6_copy(int argc, char* argv[])		 	// copy file
 {
     int error, nBytes, FDs, FDd;
-    char buffer[BYTES_PER_SECTOR];
+    char buffer[BYTES_PER_SECTOR + 1];
 
     if (!diskMounted)
     {
@@ -425,25 +425,31 @@ int P6_copy(int argc, char* argv[])		 	// copy file
         fmsError(FDd);
         return 0;
     }
-    //printf("\n FDs = %d\n FDd = %d\n", FDs, FDd);
+    printf("\n FDs = %d\n FDd = %d\n", FDs, FDd);
 
     nBytes = 1;
     while (nBytes > 0)
     {
         error = 0;
+        printf("\nReading from source");
         nBytes = fmsReadFile(FDs, buffer, BYTES_PER_SECTOR);
+        printf("\nRead from source");
         SWAP;
         if (nBytes < 0) break;
+        printf("\nWriting to destination\n");
         error = fmsWriteFile(FDd, buffer, nBytes);
+        printf("\nWrote to destination");
         if (error < 0) break;
         //for (error=0; error<nBytes; error++) putchar(buffer[error]);
     }
     if (nBytes != ERR66) fmsError(nBytes);
     if (error) fmsError(error);
 
+    printf("\nTrying to close source file");
     error = fmsCloseFile(FDs);
     if (error) fmsError(error);
 
+    printf("\nTrying to close destination file");
     error = fmsCloseFile(FDd);
     if (error) fmsError(error);
     return 0;
@@ -1725,8 +1731,6 @@ int fmsGetNextDirEntry(int *dirNum, char* mask, DirEntry* dirEntry, int dir)
     }
     return 0;
 } // end fmsGetNextDirEntry
-
-
 
 // ***************************************************************************************
 // ***************************************************************************************

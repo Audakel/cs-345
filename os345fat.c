@@ -40,6 +40,8 @@ int fmsReadFile(int, char*, int);
 int fmsSeekFile(int, int);
 int fmsWriteFile(int, char*, int);
 int fmsGetFDEntry(DirEntry* dirEntry);
+int getFreeCluster();
+int fmsUpdateDirEntry(FDEntry* fdEntry);
 
 // ***********************************************************************
 // ***********************************************************************
@@ -90,36 +92,27 @@ extern int curTask;							// current task #
 int fmsCloseFile(int fileDescriptor)
 {
 //    printf("\nBegin Close File");
-    int error;
+    int error, index, sectorNumber;
     FDEntry* fdEntry;
     fdEntry = &OFTable[fileDescriptor];
+    char buffer[BYTES_PER_SECTOR];
 
     if (fdEntry->name[0] == 0) return ERR63; // file not open
 
     if (fdEntry->mode != OPEN_READ) { // file was potentially altered and dirInfo needs to be updated
-//        printf("\nFile was potentially updated");
+        printf("\nFile was potentially updated");
 
         if (fdEntry->flags & BUFFER_ALTERED) { // buffer needs to be written back as it has been changed
             if ((error = fmsWriteSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster)))) {
                 return error;
             }
             fdEntry->flags ^= BUFFER_ALTERED;
-//            printf("\nWrote unflushed buffer");
+            printf("\nWrote unflushed buffer");
         }
 
-        DirEntry* dirEntry;
-        char fileName[32];
-        strcpy(fileName, fdEntry->name);
-        strcpy(fileName, fdEntry->extension);
+        fmsUpdateDirEntry(fdEntry);
 
-        if (fmsGetDirEntry(fileName,dirEntry)) {
-            return ERR61;
-        }
-
-        dirEntry->fileSize = fdEntry->fileSize;
-        dirEntry->startCluster = fdEntry->startCluster;
-        setDirTimeDate(dirEntry);
-//        printf("\nUpdated file information");
+        printf("\nUpdated file information");
     }
 
     fdEntry->name[0] = 0;
@@ -219,7 +212,7 @@ int fmsOpenFile(char* fileName, int rwMode)
             return ERR85; //Illegal access
     }
 
-    if (fdIndex = fmsGetFDEntry(&dirEntry) < 0) {
+    if ((fdIndex = fmsGetFDEntry(&dirEntry)) < 0) {
         //error finding fdEntry return that error
         return fdIndex;
     }
@@ -263,14 +256,16 @@ int fmsOpenFile(char* fileName, int rwMode)
 int fmsGetFDEntry(DirEntry* dirEntry)
 {
     int i, entryInd = -1;
+    FDEntry* fdEntry;
 
     for (i = 0; i < 32; i++) {
-        if (!strncmp((&OFTable[i])->name, dirEntry->name, 8) && !strncmp((&OFTable[i])->extension, dirEntry->extension, 3)) {
+        fdEntry = &OFTable[i];
+        if (!strncmp(fdEntry->name, dirEntry->name, 8) && !strncmp(fdEntry->extension, dirEntry->extension, 3)) {
             //both the name and extension match
             return ERR62;
         }
 
-        if (entryInd == -1 && !(&OFTable[i])->name[0]) {
+        if (entryInd == -1 && fdEntry->name[0] == 0) {
             entryInd = i;
         }
     }
@@ -290,7 +285,7 @@ int fmsGetFDEntry(DirEntry* dirEntry)
 //
 int fmsReadFile(int fileDescriptor, char* buffer, int nBytes)
 {
-    int error, nextCluster;
+    int error; uint16 nextCluster;
     FDEntry* fdEntry;
     int numBytesRead = 0;
     unsigned int bytestLeft, bufferIndex;
@@ -321,6 +316,7 @@ int fmsReadFile(int fileDescriptor, char* buffer, int nBytes)
                 if ((error = fmsWriteSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster)))) {
                     return error;
                 }
+                fdEntry->flags &= ~BUFFER_ALTERED;
             }
             if ((error = fmsReadSector(fdEntry->buffer, C_2_S(nextCluster)))) {
                 return error;
@@ -375,8 +371,173 @@ int fmsSeekFile(int fileDescriptor, int index)
 //
 int fmsWriteFile(int fileDescriptor, char* buffer, int nBytes)
 {
-	// ?? add code here
-	printf("\nfmsWriteFile Not Implemented");
+	int error;
+    int nextCluster, endCluster;
+    FDEntry* fdEntry;
+    int numBytesWritten = 0;
+    unsigned int bytestLeft, bufferIndex;
+    fdEntry = &OFTable[fileDescriptor];
+    if (fdEntry->name[0] == 0) return ERR63; // file not open
+    if (fdEntry->mode == OPEN_READ) return ERR85; //illegal access
 
-	return ERR63;
+    while (nBytes > 0) {
+        bufferIndex = fdEntry->fileIndex % BYTES_PER_SECTOR;
+        if ((bufferIndex == 0) && (fdEntry->fileIndex || !fdEntry->currentCluster)) {
+            if (fdEntry->currentCluster == 0) { //file has been lazy opened and buffer is not initialized
+                if (fdEntry->startCluster == 0) {
+                    if ((nextCluster = getFreeCluster()) < 2) return nextCluster;
+                    fdEntry->startCluster = (uint16) nextCluster;
+                    //printf("\nAssigning cluster %d to new file %d", cluster, fileDescriptor);
+                    setFatEntry(nextCluster, FAT_EOC, FAT1);
+                }
+                nextCluster = fdEntry->startCluster;
+                fdEntry->fileIndex = 0;
+            }
+            else {
+                nextCluster = getFatEntry(fdEntry->currentCluster,FAT1);
+                if (nextCluster == FAT_EOC) {
+                    //we have reached the end of the cluster but still have more to write
+                    //get a new cluster and append it to the end of the cluster chain
+                    if ((nextCluster = getFreeCluster())) {
+                        if (nextCluster < 2) {
+                            return nextCluster; // error
+                        }
+                        setFatEntry(fdEntry->currentCluster,nextCluster, FAT1);
+                        setFatEntry(nextCluster,FAT_EOC, FAT1);
+                    }
+
+                }
+            }
+            if (fdEntry->flags & BUFFER_ALTERED) {
+                if ((error = fmsWriteSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster)))) {
+                    return error;
+                }
+                fdEntry->flags &= ~BUFFER_ALTERED;
+            }
+            fdEntry->currentCluster = nextCluster;
+        }
+        if((error = fmsReadSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster)))) return error;
+
+        bytestLeft = BYTES_PER_SECTOR - bufferIndex;
+        if (bytestLeft > nBytes) {
+            bytestLeft = nBytes;
+        }
+        memcpy(&fdEntry->buffer[bufferIndex], buffer, bytestLeft);
+        fdEntry->fileIndex += bytestLeft;
+        numBytesWritten += bytestLeft;
+        buffer += bytestLeft;
+        nBytes -= bytestLeft;
+        fdEntry->flags |= BUFFER_ALTERED;
+        fdEntry->fileSize = fdEntry->fileIndex;
+    }
+
+    endCluster = fdEntry->currentCluster;
+    while ((nextCluster = getFatEntry(endCluster,FAT1)) != FAT_EOC) {
+//        printf("\nNext Cluster %d", nextCluster);
+//        we have completed writing and the chain hasn't ended
+//        set the further links free
+        setFatEntry(endCluster,0x00,FAT1);
+        endCluster = nextCluster;
+    }
+    setFatEntry(fdEntry->currentCluster,FAT_EOC,FAT1);
+
+    return numBytesWritten;
 } // end fmsWriteFile
+
+
+/**
+ * A 12-bit FAT entry may have the following values
+ * 0x000 Unused cluster.
+ * 0xFF0-0xFF6 Reserved cluster (like FAT entries 0 and 1).
+ * 0xFF7 Bad Cluster (contains errors and should not be used).
+ * 0xFF8-0xFFF End of file/directory, also called EOC (end of cluster chain).
+ * other numbers are pointers (indexes) to the next cluster in the file/directory.
+ */
+int getFreeCluster()
+{
+    int cluster, error, sector;
+    char buffer[BYTES_PER_SECTOR];
+    memset(buffer, 0, BYTES_PER_SECTOR * sizeof(char));
+
+    for (cluster = 2; cluster < CLUSTERS_PER_DISK; cluster++)
+    {
+
+        if (!getFatEntry(cluster, FAT1)) // if its an Unused cluster
+        {
+            // overwrite any data that may have been in the sector associated with cluster
+            sector = C_2_S(cluster);
+            if ((error = fmsWriteSector(buffer, sector)) < 0) return error;
+            return cluster;
+        }
+    }
+
+    return ERR65; // No empty entries found, so file space is full
+}
+
+// ***************************************************************************************
+// ***************************************************************************************
+int fmsUpdateDirEntry(FDEntry* fdEntry)
+//  This function finds a dirEntry relating to the fdEntry and updates it accordingly
+{
+    int num = 0;
+    int* dirNum = &num;
+    int dir = CDIR, loop = 0, dirCluster = dir;
+    char buffer[BYTES_PER_SECTOR];
+    int dirIndex, dirSector, error;
+    char fileName[32];
+    strcpy(fileName, fdEntry->name);
+    strcat(fileName, fdEntry->extension);
+    DirEntry entry;
+    DirEntry* dirEntry = &entry;
+
+    while(1)
+    {	// load directory sector
+        if (dir)
+        {	// sub directory
+            while(loop--)
+            {
+                dirCluster = getFatEntry(dirCluster, FAT1);
+                if (dirCluster == FAT_EOC) return ERR67;
+                if (dirCluster == FAT_BAD) return ERR54;
+                if (dirCluster < 2) return ERR54;
+            }
+            dirSector = C_2_S(dirCluster);
+        }
+        else
+        {	// root directory
+            dirSector = (*dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR;
+            if (dirSector >= BEG_DATA_SECTOR) return ERR67;
+        }
+
+        // read sector into directory buffer
+        if (error = fmsReadSector(buffer, dirSector)) return error;
+
+        // find next matching directory entry
+        while(1)
+        {	// read directory entry
+            dirIndex = *dirNum % ENTRIES_PER_SECTOR;
+            memcpy(dirEntry, &buffer[dirIndex * sizeof(DirEntry)], sizeof(DirEntry));
+            if (dirEntry->name[0] == 0) return ERR67;	// EOD
+            (*dirNum)++;                        		// prepare for next read
+            if (dirEntry->name[0] == 0xe5);     		// Deleted entry, go on...
+            else if (dirEntry->attributes == LONGNAME);
+            else if (fmsMask(fileName, dirEntry->name, dirEntry->extension)) {
+                //found the dirEntry that needs to be updated
+                dirEntry->fileSize = fdEntry->fileSize;
+                dirEntry->startCluster = fdEntry->startCluster;
+                dirEntry->attributes = fdEntry->attributes;
+                setDirTimeDate(dirEntry);
+                memcpy(&buffer[dirIndex * sizeof(DirEntry)], dirEntry, sizeof(DirEntry));
+                if ((error = fmsWriteSector(&buffer, dirSector)) < 0) return error;
+                fdEntry->name[0] = 0;
+                return 0;
+            }
+
+            // break if sector boundary
+            if ((*dirNum % ENTRIES_PER_SECTOR) == 0) break;
+        }
+        // next directory sector/cluster
+        loop = 1;
+    }
+    return 0;
+} // end fmsGetNextDirEntry
