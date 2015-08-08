@@ -444,29 +444,31 @@ int fmsReadFile(int fileDescriptor, char* buffer, int nBytes)
 //
 int fmsSeekFile(int fileDescriptor, int index)
 {
-    int error, endCluster, nextCluster, sector;
+    int error, nextCluster, clusters;
     FDEntry* fdEntry;
     fdEntry = &OFTable[fileDescriptor];
     if (fdEntry->name[0] == 0) return ERR63; // file not open
     if(fdEntry->mode == OPEN_WRITE || fdEntry->mode == OPEN_APPEND) return ERR85;
-//    printf("\n index(%d) > fdEntry->fileSize(%d) = %s", index,fdEntry->fileSize,index > fdEntry->fileSize ? "true" : "false");
+
     if (index > fdEntry->fileSize || index < 0) return ERR80;
 
     if ((error = flushBuffer(fdEntry))) return error;
 
     fdEntry->fileIndex = 0;
-    endCluster = fdEntry->startCluster;
-    while (fdEntry->fileIndex + BYTES_PER_SECTOR < index && (nextCluster = getFatEntry(endCluster,FAT1)) != FAT_EOC) {
+    fdEntry->currentCluster = fdEntry->startCluster;
+    clusters = index / BYTES_PER_SECTOR;
+
+    while ((clusters) && (nextCluster = getFatEntry(fdEntry->currentCluster,FAT1)) != FAT_EOC) {
         if (nextCluster == FAT_BAD) return ERR54;
         if (nextCluster < 2) return ERR54;
-        endCluster = nextCluster;
-        fdEntry->fileIndex += BYTES_PER_SECTOR;
+        fdEntry->currentCluster = nextCluster;
+        clusters--;
     }
 
     fdEntry->fileIndex = (uint16) index;
-    fmsReadSector(fdEntry->buffer, C_2_S(endCluster));
+    fmsReadSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster));
 
-	return fdEntry->fileIndex;
+    return fdEntry->fileIndex;
 } // end fmsSeekFile
 
 
