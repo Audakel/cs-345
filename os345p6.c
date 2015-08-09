@@ -425,31 +425,25 @@ int P6_copy(int argc, char* argv[])		 	// copy file
         fmsError(FDd);
         return 0;
     }
-    printf("\n FDs = %d\n FDd = %d\n", FDs, FDd);
+//    printf("\n FDs = %d\n FDd = %d\n", FDs, FDd);
 
     nBytes = 1;
     while (nBytes > 0)
     {
         error = 0;
-//        printf("\nReading from source");
         nBytes = fmsReadFile(FDs, buffer, BYTES_PER_SECTOR);
-//        printf("\nRead from source");
         SWAP;
         if (nBytes < 0) break;
-//        printf("\nWriting to destination\n");
         error = fmsWriteFile(FDd, buffer, nBytes);
-//        printf("\nWrote to destination");
         if (error < 0) break;
         //for (error=0; error<nBytes; error++) putchar(buffer[error]);
     }
     if (nBytes != ERR66) fmsError(nBytes);
     if (error) fmsError(error);
 
-//    printf("\nTrying to close source file");
     error = fmsCloseFile(FDs);
     if (error) fmsError(error);
 
-//    printf("\nTrying to close destination file");
     error = fmsCloseFile(FDd);
     if (error) fmsError(error);
     return 0;
@@ -1210,6 +1204,7 @@ int fmsTests(int test, bool debug)
             {	sprintf(buf1, "file%d.txt", i);
                 if (debug) printf("\n  fmsDeleteFile(\"%s\")", buf1);
                 try(fmsDeleteFile(buf1));
+                if (i == 14) P6_dir(0, 0);
             }
             // go up one directory again
             strcpy(buf2, "..");
@@ -1639,7 +1634,7 @@ int fmsMask(char* mask, char* name, char* ext)
     {
         if (mask[i] == '*') return 1;
         if (!mask[i] && (ext[j] == ' ')) return 1;
-        if ((mask[i] == '?') && (ext[i] != ' ')) continue;
+        if ((mask[i] == '?') && (ext[j] != ' ')) continue;
         if ((mask[i] != toupper(ext[j])) && (mask[i] != tolower(ext[j]))) return 0;
     }
     return 1;
@@ -1722,11 +1717,7 @@ int fmsGetNextDirEntry(int *dirNum, char* mask, DirEntry* dirEntry, int dir)
             (*dirNum)++;                        		// prepare for next read
             if (dirEntry->name[0] == 0xe5);     		// Deleted entry, go on...
             else if (dirEntry->attributes == LONGNAME);
-            else if (fmsMask(mask, dirEntry->name, dirEntry->extension)) {
-//                printf("\ndirNum = %d",*dirNum);
-//                printf("\ndirSector = %d",dirSector);
-                return 0;
-            }   // return if valid
+            else if (fmsMask(mask, dirEntry->name, dirEntry->extension)) return 0; // return if valid
             // break if sector boundary
             if ((*dirNum % ENTRIES_PER_SECTOR) == 0) break;
         }
