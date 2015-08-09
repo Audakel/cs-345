@@ -104,20 +104,16 @@ int fmsCloseFile(int fileDescriptor)
     if (fdEntry->name[0] == 0) return ERR63; // file not open
 
     if (fdEntry->mode != OPEN_READ) { // file was potentially altered and dirInfo needs to be updated
-//        printf("\nFile was potentially updated");
 
         if ((error = flushBuffer(fdEntry))) return error;
 
         if ((error = fmsUpdateDirEntry(fdEntry))) {
-//            printf("\nErrored in update");
             return error;
         }
 
-//        printf("\nUpdated file information");
     }
 
     fdEntry->name[0] = 0;
-//    printf("\nReleased openFileDescriptor");
 	return 0;
 } // end fmsCloseFile
 
@@ -161,7 +157,9 @@ int fmsDefineFile(char* fileName, int attribute)
     switch (attribute) {
         case 0:
             // LC3 programs use 0 for file rather than 1
+
         case ARCHIVE:
+            printf("\nCreating a file! %s", fileName);
             attribute = ARCHIVE;
             if (!isValidFileName(fileName)) {
                 return ERR50; // invalid file name
@@ -283,6 +281,8 @@ int fmsDeleteFile(char* fileName)
             setFatEntry(endCluster,0x00,FAT2);
             endCluster = nextCluster;
         }
+        setFatEntry(endCluster,0x00,FAT1);
+        setFatEntry(endCluster,0x00,FAT2);
     }
 
 
@@ -578,17 +578,19 @@ int fmsWriteFile(int fileDescriptor, char* buffer, int nBytes)
         if (debug) { printf("\n\tend loop with nBytes = %d", nBytes); }
     }
 
-//    endCluster = fdEntry->currentCluster;
-//    while ((nextCluster = getFatEntry(endCluster,FAT1)) != FAT_EOC) {
-////        printf("\nNext Cluster %d", nextCluster);
-////        we have completed writing and the chain hasn't ended
-////        set the further links free
-//        setFatEntry(endCluster,0x00,FAT1);
-//        setFatEntry(endCluster,0x00,FAT2);
-//        endCluster = nextCluster;
-//    }
-//    setFatEntry(fdEntry->currentCluster,FAT_EOC,FAT1);
-//    setFatEntry(fdEntry->currentCluster,FAT_EOC,FAT2);
+    if (fdEntry->mode != OPEN_RDWR || fdEntry->fileIndex > fdEntry->fileSize) {
+        endCluster = fdEntry->currentCluster;
+        while ((nextCluster = getFatEntry(endCluster, FAT1)) != FAT_EOC) {
+//        printf("\nNext Cluster %d", nextCluster);
+//        we have completed writing and the chain hasn't ended
+//        set the further links free
+            setFatEntry(endCluster, 0x00, FAT1);
+            setFatEntry(endCluster, 0x00, FAT2);
+            endCluster = nextCluster;
+        }
+        setFatEntry(fdEntry->currentCluster, FAT_EOC, FAT1);
+        setFatEntry(fdEntry->currentCluster, FAT_EOC, FAT2);
+    }
     if (debug) { printf("\n\twrote %d bytes", numBytesWritten); }
     if (debug) { printf("\n\tend writing buffer |%s|", buffer); }
     return numBytesWritten;
@@ -641,7 +643,7 @@ int getFreeDirEntry(int * dirNum, DirEntry* dirEntry, int * dirSector)
     int dirIndex, error;
     int loop = *dirNum / ENTRIES_PER_SECTOR;
     int dirCluster = dir, nextCluster;
-//    printf("\nBegin getFreeDirEntry");
+    printf("\nBegin getFreeDirEntry");
 
     while(1)
     {	// load directory sector
@@ -768,7 +770,7 @@ int fmsUpdateDirEntry(FDEntry* fdEntry)
     dirNum--; //fmsGetNextDirEntry increments preemptively
     dirIndex = dirNum % ENTRIES_PER_SECTOR; //same as process in fmsGetNextDir
     // if its in the root directory (!CDIR) otherwise use C_2_S
-    dirSector = !CDIR ? (dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR : C_2_S(fdEntry->directoryCluster);
+    dirSector = !CDIR ? (dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR : C_2_S(CDIR);
 
     //Update dirEntry potential changes
     dirEntry.fileSize = fdEntry->fileSize;
