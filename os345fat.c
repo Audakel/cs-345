@@ -159,7 +159,6 @@ int fmsDefineFile(char* fileName, int attribute)
             // LC3 programs use 0 for file rather than 1
 
         case ARCHIVE:
-            printf("\nCreating a file! %s", fileName);
             attribute = ARCHIVE;
             if (!isValidFileName(fileName)) {
                 return ERR50; // invalid file name
@@ -643,7 +642,6 @@ int getFreeDirEntry(int * dirNum, DirEntry* dirEntry, int * dirSector)
     int dirIndex, error;
     int loop = *dirNum / ENTRIES_PER_SECTOR;
     int dirCluster = dir, nextCluster;
-    printf("\nBegin getFreeDirEntry");
 
     while(1)
     {	// load directory sector
@@ -763,14 +761,12 @@ int fmsUpdateDirEntry(FDEntry* fdEntry)
     char buffer[BYTES_PER_SECTOR];
     strcpy(fileName, fdEntry->name);
     DirEntry dirEntry;
-    if((error = fmsGetNextDirEntry(&dirNum,fileName,&dirEntry,CDIR))){
+    if((error = getDirEntry(&dirNum,fileName,&dirEntry,&dirSector))){
         return error;
     }
 
     dirNum--; //fmsGetNextDirEntry increments preemptively
     dirIndex = dirNum % ENTRIES_PER_SECTOR; //same as process in fmsGetNextDir
-    // if its in the root directory (!CDIR) otherwise use C_2_S
-    dirSector = !CDIR ? (dirNum / ENTRIES_PER_SECTOR) + BEG_ROOT_SECTOR : C_2_S(CDIR);
 
     //Update dirEntry potential changes
     dirEntry.fileSize = fdEntry->fileSize;
@@ -828,8 +824,10 @@ int flushBuffer(FDEntry* fdEntry)
 
     if(fdEntry->flags & BUFFER_ALTERED)
     {
+//        printf("\nBuffer altered for %s", fdEntry->name);
         if((error = fmsWriteSector(fdEntry->buffer, C_2_S(fdEntry->currentCluster)))) return error;
         fdEntry->flags &= ~BUFFER_ALTERED;
+//        if ((error = fmsUpdateDirEntry(fdEntry)))  return error;
     }
 
     return 0;
